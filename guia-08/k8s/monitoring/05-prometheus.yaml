@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        monitor: 'devops-portfolio'
+        environment: 'local'
+    rule_files:
+      - "alerts.yml"
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+      - job_name: flask-app
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["backend-service.devops-portfolio.svc.cluster.local:5000"]
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: instance
+            replacement: 'notes-backend'
+      - job_name: node-exporter
+        static_configs:
+          - targets: ["node-exporter.monitoring.svc.cluster.local:9100"]
+      - job_name: cadvisor
+        static_configs:
+          - targets: ["cadvisor.monitoring.svc.cluster.local:8080"]
+        # TP08 filtra acá por container_label_com_docker_compose_project:
+        # ese label solo existe en contenedores levantados con Docker
+        # Compose. En Kubernetes (containerd/K3s) no aplica — si se
+        # mantuviera el filtro, cAdvisor quedaría sin métricas (0 matches).
+        # Se omite a propósito; ningún panel del dashboard usa métricas de
+        # cAdvisor filtradas por ese label.
+  alerts.yml: |
+    groups:
+      - name: app-alerts
+        interval: 30s
+        rules:
+          - alert: AppDown
+            expr: up{job="flask-app"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "App caída"
+              description: "El backend Flask no responde desde hace más de 1 minuto."
+          - alert: HighCPU
+            expr: |
+              100 - (avg by(instance)(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "CPU alta en {{ $labels.instance }}"
+              description: "Uso de CPU alto."
+          - alert: HighErrorRate
+            expr: |
+              rate(app_requests_total{status=~"5.."}[5m])
+              /
+              rate(app_requests_total[5m]) > 0.05
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Tasa de errores alta"
+              description: "Más del 5% de requests están fallando."
+          - alert: DiskSpaceLow
+            expr: |
+              (node_filesystem_size_bytes{mountpoint="/"} -
+               node_filesystem_free_bytes{mountpoint="/"})
+              / node_filesystem_size_bytes{mountpoint="/"} > 0.85
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Disco casi lleno"
+              description: "Uso de disco alto."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+          ports:
+            - name: http
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  type: LoadBalancer
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
