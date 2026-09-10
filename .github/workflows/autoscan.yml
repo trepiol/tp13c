@@ -58,14 +58,10 @@ jobs:
             guia-06/app/frontend
 
 
-  # ============================================================
-  # 3. BUILD + PUSH A DOCKER HUB
-  # ============================================================
-  build_push:
+    build_push:
     runs-on: ubuntu-latest
     needs: test
 
-    # Publica imágenes tanto en push como en ejecución manual.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
@@ -110,15 +106,6 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/notes-frontend:${{ github.sha }}
-
-      - name: Build y Push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: guia-06/app/frontend
-          push: true
-          tags: |
-            ${{ vars.DOCKERHUB_USERNAME }}/notes-frontend:${{ github.sha }}
-
   # ============================================================
   # 4. OWASP ZAP
   # ============================================================
