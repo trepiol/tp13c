@@ -1,0 +1,4 @@
+
+# Reportes generados por OWASP ZAP
+guia-13/reportes/*.html
+guia-13/reportes/*.json
