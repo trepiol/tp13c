@@ -65,8 +65,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
 
-    # Solamente publica imágenes cuando el evento es un push.
-    if: github.event_name == 'push'
+    # Publica imágenes tanto en push como en ejecución manual.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout del repositorio
@@ -75,10 +75,24 @@ jobs:
       - name: Configurar Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Validar configuración Docker Hub
+        run: |
+          if [ -z "${{ vars.DOCKERHUB_USERNAME }}" ]; then
+            echo "ERROR: DOCKERHUB_USERNAME no está configurado"
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "ERROR: DOCKERHUB_TOKEN no está configurado"
+            exit 1
+          fi
+
+          echo "Docker Hub username configurado: ${{ vars.DOCKERHUB_USERNAME }}"
+
       - name: Login en Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build y Push backend
@@ -87,7 +101,7 @@ jobs:
           context: guia-06/app/backend
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/notes-backend:${{ github.sha }}
+            ${{ vars.DOCKERHUB_USERNAME }}/notes-backend:${{ github.sha }}
 
       - name: Build y Push frontend
         uses: docker/build-push-action@v6
@@ -95,8 +109,7 @@ jobs:
           context: guia-06/app/frontend
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/notes-frontend:${{ github.sha }}
-
+            ${{ vars.DOCKERHUB_USERNAME }}/notes-frontend:${{ github.sha }}
 
   # ============================================================
   # 4. OWASP ZAP
