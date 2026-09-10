@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zap-reports
+  namespace: devops-portfolio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zap-automation-plan
+  namespace: devops-portfolio
+data:
+  zap.yaml: |
+    ---
+    env:
+      contexts:
+        - name: notes-kubernetes
+          urls:
+            - "http://frontend-service.devops-portfolio.svc.cluster.local"
+          includePaths:
+            - "http://frontend-service\\.devops-portfolio\\.svc\\.cluster\\.local/.*"
+
+      parameters:
+        failOnError: true
+        failOnWarning: false
+        progressToStdout: true
+
+    jobs:
+      - type: spider
+        parameters:
+          context: notes-kubernetes
+          url: "http://frontend-service.devops-portfolio.svc.cluster.local"
+          maxDuration: 2
+
+      - type: spiderAjax
+        parameters:
+          context: notes-kubernetes
+          url: "http://frontend-service.devops-portfolio.svc.cluster.local"
+          maxDuration: 2
+          browserId: firefox-headless
+
+      - type: passiveScan-wait
+        parameters:
+          maxDuration: 5
+
+      - type: activeScan
+        parameters:
+          context: notes-kubernetes
+          policy: "Default Policy"
+          maxScanDurationInMins: 5
+
+      - type: report
+        parameters:
+          template: traditional-html
+          reportDir: /zap/wrk/reports
+          reportFile: zap-k8s-report.html
+          reportTitle: "Notes App Kubernetes - Security Scan"
+
+      - type: report
+        parameters:
+          template: traditional-json
+          reportDir: /zap/wrk/reports
+          reportFile: zap-k8s-report.json
+          reportTitle: "Notes App Kubernetes - Security Scan"
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zap-security-scan
+  namespace: devops-portfolio
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      containers:
+        - name: zap
+          image: ghcr.io/zaproxy/zaproxy:stable
+          command:
+            - zap.sh
+          args:
+            - -cmd
+            - -port
+            - "8091"
+            - -autorun
+            - /zap/config/zap.yaml
+
+          volumeMounts:
+            - name: plan
+              mountPath: /zap/config
+              readOnly: true
+
+            - name: reports
+              mountPath: /zap/wrk/reports
+
+      volumes:
+        - name: plan
+          configMap:
+            name: zap-automation-plan
+
+        - name: reports
+          persistentVolumeClaim:
+            claimName: zap-reports
